@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+motor
+pymongo
+pydantic-settings
+pydantic[email]
+httpx
+icecream
+python-multipart
