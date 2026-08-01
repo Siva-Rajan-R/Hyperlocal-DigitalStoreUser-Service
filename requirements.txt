@@ -7,3 +7,5 @@ pydantic[email]
 httpx
 icecream
 python-multipart
+
+websockets
