@@ -4,6 +4,7 @@ from integrations.inventory_service import get_products, get_product_by_id
 from integrations.shop_service import get_shops, get_shop_by_id
 from integrations.order_service import get_orders_by_user_id, get_order_by_id
 from integrations.cart_service import init_cart_session, add_cart_item, remove_cart_item, cancel_cart_session, get_cart_session
+from schemas.v1.shop_schemas import DeliveryTypeEnum
 
 router = APIRouter(
     prefix="/digitalstore",
@@ -29,11 +30,21 @@ async def fetch_product_by_id(shop_id: str, id: str):
 # --- SHOPS ---
 @router.get("/shops")
 async def fetch_shops(
-    q: str = Query(default=""),
+    latitude: float = Query(..., description="User latitude"),
+    longitude: float = Query(..., description="User longitude"),
+    delivery_type: DeliveryTypeEnum = Query(default=DeliveryTypeEnum.INSTANT, description="Delivery type: PICKUP_ONLY, INSTANT, STANDARD, NATIONWIDE"),
     limit: int = Query(default=10, ge=1, le=100),
-    offset: int = Query(default=1, ge=1)
+    offset: int = Query(default=1, ge=1),
+    timezone: str = Query(default="Asia/Kolkata", description="User timezone")
 ):
-    return await get_shops(query=q, limit=limit, offset=offset)
+    return await get_shops(
+        latitude=latitude,
+        longitude=longitude,
+        delivery_type=delivery_type.value if hasattr(delivery_type, "value") else delivery_type,
+        limit=limit,
+        offset=offset,
+        timezone=timezone
+    )
 
 @router.get("/shops/{shop_id}")
 async def fetch_shop_by_id(shop_id: str):

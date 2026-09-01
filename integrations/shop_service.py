@@ -1,8 +1,9 @@
+import os
 import httpx
 from typing import Optional, List, Dict, Any
 from icecream import ic
 
-SHOP_SERVICE_URL = "http://localhost:8001"
+SHOP_SERVICE_URL = os.getenv("SHOP_SERVICE_URL", "http://localhost:8001")
 
 def reshape_shop(shop: Any) -> Any:
     if isinstance(shop, list):
@@ -15,7 +16,7 @@ def reshape_shop(shop: Any) -> Any:
     allowed_keys = [
         "id", "name", "description", "tagline", "categories", 
         "banner_url", "logo_url", "operating_hours", 
-        "delivery_options", "announcements"
+        "delivery_options", "announcements", "address"
     ]
     for key in allowed_keys:
         if key in shop:
@@ -26,27 +27,41 @@ def reshape_shop(shop: Any) -> Any:
         s["category"] = shop["category"]
     return s
 
-async def get_shops(query: str = "", limit: int = 10, offset: int = 1) -> Dict[str, Any]:
+async def get_shops(
+    latitude: float,
+    longitude: float,
+    delivery_type: str = "INSTANT",
+    limit: int = 10,
+    offset: int = 1,
+    timezone: str = "Asia/Kolkata"
+) -> Dict[str, Any]:
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(
-                f"{SHOP_SERVICE_URL}/shops",
-                params={"q": query, "limit": limit, "offset": offset}
+            payload = {
+                "latitude": latitude,
+                "longitude": longitude,
+                "delivery_type": delivery_type,
+                "limit": limit,
+                "offset": offset,
+                "timezone": timezone
+            }
+            response = await client.post(
+                f"{SHOP_SERVICE_URL}/shops/geofenced",
+                json=payload
             )
             if response.status_code == 200:
                 data = response.json()
-                if isinstance(data, list):
-                    return {"datas": [reshape_shop(s) for s in data]}
-                elif isinstance(data, dict):
-                    datas = data.get("datas") or []
-                    # check if it is direct array or pagination dict
-                    if not datas and "name" in data: # single object or raw array returned directly
-                        return {"datas": [reshape_shop(data)]}
-                    data["datas"] = [reshape_shop(s) for s in datas]
-                    return data
+                raw_shops = data.get("data") if isinstance(data, dict) and "data" in data else data
+                if isinstance(raw_shops, list):
+                    return {"datas": [reshape_shop(s) for s in raw_shops]}
+                elif isinstance(raw_shops, dict):
+                    datas = raw_shops.get("datas") or []
+                    if not datas and ("name" in raw_shops or "id" in raw_shops):
+                        return {"datas": [reshape_shop(raw_shops)]}
+                    return {"datas": [reshape_shop(s) for s in datas]}
             return {"datas": []}
     except Exception as e:
-        ic(f"Error calling Shop Service: {e}")
+        ic(f"Error calling Shop Service geofenced endpoint: {e}")
         return {"datas": []}
 
 async def get_shop_by_id(shop_id: str) -> Optional[Dict[str, Any]]:
@@ -61,3 +76,4 @@ async def get_shop_by_id(shop_id: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         ic(f"Error calling Shop Service for shop {shop_id}: {e}")
         return None
+
