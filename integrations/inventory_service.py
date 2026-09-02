@@ -1,8 +1,9 @@
+import os
 import httpx
 from typing import Optional, List, Dict, Any
 from icecream import ic
 
-INVENTORY_SERVICE_URL = "http://localhost:8004"
+INVENTORY_SERVICE_URL = os.getenv("INVENTORY_SERVICE_URL", "http://localhost:8004")
 
 def reshape_product(prod: Any) -> Any:
     if isinstance(prod, list):
@@ -31,20 +32,41 @@ async def get_products(query: str = "", limit: int = 10, offset: int = 1) -> Dic
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
                 f"{INVENTORY_SERVICE_URL}/inventories",
-                params={"q": query, "limit": limit, "offset": offset}
+                params={"q": query, "limit": limit, "offset": offset, "visible_online": True}
             )
             if response.status_code == 200:
                 data = response.json()
+                raw_prods = data.get("data") if isinstance(data, dict) and "data" in data else data
                 # If list of products
-                if isinstance(data, list):
-                    return {"datas": [reshape_product(p) for p in data]}
-                elif isinstance(data, dict):
-                    datas = data.get("datas") or []
-                    data["datas"] = [reshape_product(p) for p in datas]
-                    return data
+                if isinstance(raw_prods, list):
+                    return {"datas": [reshape_product(p) for p in raw_prods]}
+                elif isinstance(raw_prods, dict):
+                    datas = raw_prods.get("datas") or []
+                    return {"datas": [reshape_product(p) for p in datas]}
             return {"datas": []}
     except Exception as e:
         ic(f"Error calling Inventory Service: {e}")
+        return {"datas": []}
+
+async def get_products_by_shop(shop_id: str, query: str = "", limit: int = 10, offset: int = 1) -> Dict[str, Any]:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{INVENTORY_SERVICE_URL}/inventories/by/shop/{shop_id}",
+                params={"q": query, "limit": limit, "offset": offset, "visible_online": True}
+            )
+            if response.status_code == 200:
+                data = response.json()
+                raw_prods = data.get("data") if isinstance(data, dict) and "data" in data else data
+                # If list of products
+                if isinstance(raw_prods, list):
+                    return {"datas": [reshape_product(p) for p in raw_prods]}
+                elif isinstance(raw_prods, dict):
+                    datas = raw_prods.get("datas") or []
+                    return {"datas": [reshape_product(p) for p in datas]}
+            return {"datas": []}
+    except Exception as e:
+        ic(f"Error calling Inventory Service for shop {shop_id}: {e}")
         return {"datas": []}
 
 async def get_product_by_id(shop_id: str, product_id: str) -> Optional[Dict[str, Any]]:
@@ -54,7 +76,12 @@ async def get_product_by_id(shop_id: str, product_id: str) -> Optional[Dict[str,
                 f"{INVENTORY_SERVICE_URL}/inventories/by/id/{shop_id}/{product_id}"
             )
             if response.status_code == 200:
-                return reshape_product(response.json())
+                data = response.json()
+                raw_prod = data.get("data") if isinstance(data, dict) and "data" in data else data
+                if isinstance(raw_prod, dict):
+                    if raw_prod.get("visible_online") is False:
+                        return None
+                    return reshape_product(raw_prod)
             return None
     except Exception as e:
         ic(f"Error calling Inventory Service for product {product_id}: {e}")
