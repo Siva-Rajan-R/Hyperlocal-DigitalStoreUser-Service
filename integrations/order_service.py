@@ -3,7 +3,7 @@ import httpx
 from typing import Optional, List, Dict, Any
 from icecream import ic
 
-ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL", "http://localhost:8007")
+ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL", "http://127.0.0.1:8007")
 
 def reshape_order(order: Any) -> Any:
     if isinstance(order, list):

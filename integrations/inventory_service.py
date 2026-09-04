@@ -3,7 +3,7 @@ import httpx
 from typing import Optional, List, Dict, Any
 from icecream import ic
 
-INVENTORY_SERVICE_URL = os.getenv("INVENTORY_SERVICE_URL", "http://localhost:8004")
+INVENTORY_SERVICE_URL = os.getenv("INVENTORY_SERVICE_URL", "http://127.0.0.1:8004")
 
 def reshape_product(prod: Any) -> Any:
     if isinstance(prod, list):

@@ -1,9 +1,12 @@
+import os
 import httpx
 from typing import Optional, Dict, Any
 from icecream import ic
+from dotenv import load_dotenv
 from .inventory_service import reshape_product
+load_dotenv()
 
-ORDER_SERVICE_URL = "http://localhost:8007"
+ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL", "http://127.0.0.1:8007")
 
 async def init_cart_session() -> Dict[str, Any]:
     try:
