@@ -6,6 +6,9 @@ from dotenv import load_dotenv
 from .inventory_service import reshape_product
 load_dotenv()
 
+from fastapi import HTTPException
+from .shop_service import get_shop_by_id
+
 ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL", "http://127.0.0.1:8007")
 
 async def init_cart_session() -> Dict[str, Any]:
@@ -20,13 +23,33 @@ async def init_cart_session() -> Dict[str, Any]:
         return {"detail": f"Order Service communication error: {str(e)}"}
 
 async def add_cart_item(data: dict) -> Dict[str, Any]:
+    # Check if shop is visibility only
+    shop_id = data.get("shop_id")
+    if shop_id:
+        shop = await get_shop_by_id(shop_id)
+        if shop and (shop.get("visibility_only") is True or shop.get("is_ordering_enabled") is False):
+            shop_name = shop.get("name", shop_id)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Online ordering is not available for shop '{shop_name}'. This shop is listed for visibility only."
+            )
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(f"{ORDER_SERVICE_URL}/cart/add", json=data)
+            if response.status_code >= 400:
+                try:
+                    err_json = response.json()
+                    err_detail = err_json.get("detail", response.text)
+                except Exception:
+                    err_detail = response.text
+                raise HTTPException(status_code=response.status_code, detail=err_detail)
             return response.json()
+    except HTTPException:
+        raise
     except Exception as e:
         ic(f"Error adding item to cart: {e}")
-        return {"detail": f"Order Service communication error: {str(e)}"}
+        raise HTTPException(status_code=500, detail=f"Order Service communication error: {str(e)}")
 
 async def remove_cart_item(data: dict) -> Dict[str, Any]:
     try:

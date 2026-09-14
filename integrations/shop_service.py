@@ -16,7 +16,12 @@ def reshape_shop(shop: Any) -> Any:
     allowed_keys = [
         "id", "name", "description", "tagline", "categories", 
         "banner_url", "logo_url", "operating_hours", 
-        "delivery_options", "announcements", "address"
+        "delivery_options", "announcements", "address",
+        "distance_km", "visibility_only", "is_ordering_enabled",
+        "visible_online",
+        "has_operating_hours", "has_delivery_options",
+        "is_digital_store_configured", "can_show_digital_store_dashboard",
+        "additional_infos", "datas"
     ]
     for key in allowed_keys:
         if key in shop:
@@ -25,6 +30,33 @@ def reshape_shop(shop: Any) -> Any:
     # Include category for schema compatibility if present
     if "category" in shop:
         s["category"] = shop["category"]
+    elif "categories" in shop and shop["categories"]:
+        s["category"] = shop["categories"][0]
+    else:
+        s["category"] = ""
+        
+    # Ensure visibility_only and is_ordering_enabled flags are consistently resolved
+    add_infos = shop.get("additional_infos") or shop.get("datas") or {}
+    vis_only = shop.get("visibility_only", add_infos.get("visibility_only", False))
+    ord_enabled = shop.get("is_ordering_enabled", add_infos.get("is_ordering_enabled", not vis_only))
+    if vis_only:
+        ord_enabled = False
+        
+    s["visibility_only"] = bool(vis_only)
+    s["is_ordering_enabled"] = bool(ord_enabled)
+    
+    hours = shop.get("operating_hours") or []
+    deliv = shop.get("delivery_options") or []
+    vis_online = bool(shop.get("visible_online", False))
+    has_hours = len(hours) > 0
+    has_deliv = len(deliv) > 0
+    s["has_operating_hours"] = has_hours
+    s["has_delivery_options"] = has_deliv
+    s["is_digital_store_configured"] = bool(has_hours or has_deliv or vis_online)
+    s["can_show_digital_store_dashboard"] = bool(has_hours or has_deliv or vis_online)
+    
+    if "distance_km" in shop:
+        s["distance_km"] = shop["distance_km"]
     return s
 
 async def get_shops(
@@ -71,7 +103,9 @@ async def get_shop_by_id(shop_id: str) -> Optional[Dict[str, Any]]:
                 f"{SHOP_SERVICE_URL}/shops/by/{shop_id}"
             )
             if response.status_code == 200:
-                return reshape_shop(response.json())
+                data = response.json()
+                raw_shop = data.get("data") if isinstance(data, dict) and "data" in data else data
+                return reshape_shop(raw_shop)
             return None
     except Exception as e:
         ic(f"Error calling Shop Service for shop {shop_id}: {e}")
