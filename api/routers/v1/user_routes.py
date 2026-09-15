@@ -172,12 +172,28 @@ async def favorite_shop(data: FavoriteShopSchema):
         {"$set": {"timestamp": datetime.utcnow()}},
         upsert=True
     )
+    try:
+        import httpx
+        from core.configs.settings_config import SETTINGS
+        shop_url = getattr(SETTINGS, "SHOP_SERVICE_URL", "http://127.0.0.1:8001")
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            await client.post(f"{shop_url}/shops/followers", json={"shop_id": data.shop_id, "user_id": data.user_id})
+    except Exception:
+        pass
     return {"message": "Shop followed/favorited"}
 
 @router.delete("/favorites/shop/{user_id}/{shop_id}")
 async def unfavorite_shop(user_id: str, shop_id: str):
     favs = get_collection("favourite_shops")
     result = await favs.delete_one({"user_id": user_id, "shop_id": shop_id})
+    try:
+        import httpx
+        from core.configs.settings_config import SETTINGS
+        shop_url = getattr(SETTINGS, "SHOP_SERVICE_URL", "http://127.0.0.1:8001")
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            await client.delete(f"{shop_url}/shops/followers/{shop_id}/{user_id}")
+    except Exception:
+        pass
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Favorite shop/follow not found")
     return {"message": "Shop unfollowed/unfavorited"}
@@ -191,7 +207,24 @@ async def get_favorite_shops(
     favs = get_collection("favourite_shops")
     cursor = favs.find({"user_id": user_id}, {"_id": 0, "shop_id": 1}).skip(offset).limit(limit)
     results = await cursor.to_list(length=limit)
-    return [r["shop_id"] for r in results]
+    return [r["shop_id"] for r in results if "shop_id" in r]
+
+@router.get("/favorites/shop/{shop_id}/followers")
+async def get_shop_followers(
+    shop_id: str,
+    limit: int = Query(default=1000, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0)
+):
+    favs = get_collection("favourite_shops")
+    cursor = favs.find({"shop_id": shop_id}, {"_id": 0, "user_id": 1}).skip(offset).limit(limit)
+    results = await cursor.to_list(length=limit)
+    return [r["user_id"] for r in results if "user_id" in r]
+
+@router.get("/favorites/shop/{shop_id}/count")
+async def get_shop_followers_count(shop_id: str):
+    favs = get_collection("favourite_shops")
+    count = await favs.count_documents({"shop_id": shop_id})
+    return {"shop_id": shop_id, "count": count}
 
 
 # --- REVIEWS ENDPOINTS ---
