@@ -95,7 +95,21 @@ async def get_order_by_id(shop_id: str, order_id: str) -> Optional[Dict[str, Any
             if response.status_code == 200:
                 data = response.json()
                 payload = data.get("data") if isinstance(data, dict) and "data" in data else data
-                return reshape_order(payload)
+                reshaped = reshape_order(payload)
+                if isinstance(reshaped, dict):
+                    try:
+                        from infras.db.mongo import MongoDBManager
+                        if MongoDBManager.client:
+                            code_doc = await MongoDBManager.client["OrderReadDb"]["Order_Delivery_Codes"].find_one({
+                                "order_id": order_id
+                            })
+                            if code_doc and code_doc.get("code"):
+                                reshaped["delivery_code"] = code_doc["code"]
+                                reshaped["delivery_otp"] = code_doc["code"]
+                                reshaped["otp"] = code_doc["code"]
+                    except Exception as ce:
+                        ic(f"Error attaching delivery code: {ce}")
+                return reshaped
             return None
     except Exception as e:
         ic(f"Error calling Order Service for order {order_id}: {e}")
