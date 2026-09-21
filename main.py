@@ -1,5 +1,5 @@
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from contextlib import asynccontextmanager
 from api.routers.v1 import user_routes, digitalstore_routes
 from infras.db.mongo import MongoDBManager
@@ -22,8 +22,19 @@ app = FastAPI(
 app.include_router(user_routes.router)
 app.include_router(digitalstore_routes.router)
 
+from fastapi.responses import RedirectResponse
+from urllib.parse import quote
+
+@app.get("/")
+async def root_fallback(request: Request):
+    error = request.query_params.get("error")
+    if error:
+        return RedirectResponse(url=f"http://localhost:5173/auth/callback?error={quote(str(error))}")
+    return {"service": "DigitalStoreUser-Service", "status": "running"}
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=SETTINGS.PORT, reload=True)
+
 
 
 
