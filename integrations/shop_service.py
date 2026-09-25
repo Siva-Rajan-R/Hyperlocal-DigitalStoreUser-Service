@@ -21,7 +21,7 @@ def reshape_shop(shop: Any) -> Any:
         "visible_online",
         "has_operating_hours", "has_delivery_options",
         "is_digital_store_configured", "can_show_digital_store_dashboard",
-        "additional_infos", "datas"
+        "additional_infos", "datas", "vacation_mode", "vacation_infos"
     ]
     for key in allowed_keys:
         if key in shop:
@@ -45,15 +45,30 @@ def reshape_shop(shop: Any) -> Any:
     s["visibility_only"] = bool(vis_only)
     s["is_ordering_enabled"] = bool(ord_enabled)
     
+    # Resolve vacation mode
+    v_infos = shop.get("vacation_infos") or add_infos.get("vacation_infos") or {}
+    vac_mode = shop.get("vacation_mode", add_infos.get("vacation_mode", v_infos.get("enabled", False) if isinstance(v_infos, dict) else False))
+    s["vacation_mode"] = bool(vac_mode)
+    s["vacation_infos"] = v_infos if isinstance(v_infos, dict) else {"enabled": bool(vac_mode)}
+    
+    mock_expired = os.getenv("MOCK_SUBSCRIPTION_EXPIRED", "false").lower() in ("true", "1", "yes")
+    sub_status = shop.get("subscription_status") or add_infos.get("subscription_status") or ("expired" if mock_expired else "active")
+    is_sub_expired = mock_expired or sub_status == "expired" or shop.get("is_subscription_expired", False)
+    
+    s["is_subscription_expired"] = bool(is_sub_expired)
+    s["subscription_status"] = "expired" if is_sub_expired else "active"
+
     hours = shop.get("operating_hours") or []
     deliv = shop.get("delivery_options") or []
-    vis_online = bool(shop.get("visible_online", False))
+    vis_online = bool(shop.get("visible_online", False)) and not is_sub_expired
     has_hours = len(hours) > 0
     has_deliv = len(deliv) > 0
     s["has_operating_hours"] = has_hours
     s["has_delivery_options"] = has_deliv
-    s["is_digital_store_configured"] = bool(has_hours or has_deliv or vis_online)
+    s["is_digital_store_configured"] = bool(has_hours or has_deliv or vis_online) and not is_sub_expired
     s["can_show_digital_store_dashboard"] = bool(has_hours or has_deliv or vis_online)
+    if is_sub_expired:
+        s["is_ordering_enabled"] = False
     
     if "distance_km" in shop:
         s["distance_km"] = shop["distance_km"]

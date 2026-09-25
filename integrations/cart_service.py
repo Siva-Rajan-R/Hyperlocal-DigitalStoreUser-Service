@@ -23,16 +23,26 @@ async def init_cart_session() -> Dict[str, Any]:
         return {"detail": f"Order Service communication error: {str(e)}"}
 
 async def add_cart_item(data: dict) -> Dict[str, Any]:
-    # Check if shop is visibility only
+    # Check if shop is visibility only or in vacation mode
     shop_id = data.get("shop_id")
     if shop_id:
         shop = await get_shop_by_id(shop_id)
-        if shop and (shop.get("visibility_only") is True or shop.get("is_ordering_enabled") is False):
-            shop_name = shop.get("name", shop_id)
-            raise HTTPException(
-                status_code=400,
-                detail=f"Online ordering is not available for shop '{shop_name}'. This shop is listed for visibility only."
-            )
+        if shop:
+            add_infos = shop.get("additional_infos") or {}
+            is_vacation = shop.get("vacation_mode") is True or add_infos.get("vacation_mode") is True or (isinstance(add_infos.get("vacation_infos"), dict) and add_infos.get("vacation_infos", {}).get("enabled") is True)
+            if is_vacation:
+                shop_name = shop.get("name", shop_id)
+                notice = add_infos.get("vacation_message") or (add_infos.get("vacation_infos", {}).get("message") if isinstance(add_infos.get("vacation_infos"), dict) else None) or "This shop is currently in vacation mode and not accepting orders."
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Shop '{shop_name}' is currently in vacation mode. {notice}"
+                )
+            if shop.get("visibility_only") is True or shop.get("is_ordering_enabled") is False:
+                shop_name = shop.get("name", shop_id)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Online ordering is not available for shop '{shop_name}'. This shop is listed for visibility only."
+                )
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
