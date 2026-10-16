@@ -100,18 +100,20 @@ async def get_shops(
                 data = response.json()
                 raw_shops = data.get("data") if isinstance(data, dict) and "data" in data else data
                 if isinstance(raw_shops, list):
-                    return {"datas": [reshape_shop(s) for s in raw_shops]}
+                    return {"datas": [reshape_shop(s) for s in raw_shops if s and s.get("visible_online") is True]}
                 elif isinstance(raw_shops, dict):
                     datas = raw_shops.get("datas") or []
                     if not datas and ("name" in raw_shops or "id" in raw_shops):
-                        return {"datas": [reshape_shop(raw_shops)]}
-                    return {"datas": [reshape_shop(s) for s in datas]}
+                        if raw_shops.get("visible_online") is True:
+                            return {"datas": [reshape_shop(raw_shops)]}
+                        return {"datas": []}
+                    return {"datas": [reshape_shop(s) for s in datas if s and s.get("visible_online") is True]}
             return {"datas": []}
     except Exception as e:
         ic(f"Error calling Shop Service geofenced endpoint: {e}")
         return {"datas": []}
 
-async def get_shop_by_id(shop_id: str) -> Optional[Dict[str, Any]]:
+async def get_shop_by_id(shop_id: str, allow_offline: bool = False) -> Optional[Dict[str, Any]]:
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
@@ -120,6 +122,11 @@ async def get_shop_by_id(shop_id: str) -> Optional[Dict[str, Any]]:
             if response.status_code == 200:
                 data = response.json()
                 raw_shop = data.get("data") if isinstance(data, dict) and "data" in data else data
+                if not raw_shop:
+                    return None
+                # If shop is not visible online, do not send to digital store response
+                if not allow_offline and not raw_shop.get("visible_online"):
+                    return None
                 return reshape_shop(raw_shop)
             return None
     except Exception as e:

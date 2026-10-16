@@ -50,6 +50,10 @@ async def get_products(query: str = "", limit: int = 10, offset: int = 1) -> Dic
 
 async def get_products_by_shop(shop_id: str, query: str = "", limit: int = 10, offset: int = 1) -> Dict[str, Any]:
     try:
+        from integrations.shop_service import get_shop_by_id
+        shop = await get_shop_by_id(shop_id)
+        if not shop or not shop.get("visible_online"):
+            return {"datas": []}
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
                 f"{INVENTORY_SERVICE_URL}/inventories/by/shop/{shop_id}",
@@ -71,6 +75,10 @@ async def get_products_by_shop(shop_id: str, query: str = "", limit: int = 10, o
 
 async def get_product_by_id(shop_id: str, product_id: str) -> Optional[Dict[str, Any]]:
     try:
+        from integrations.shop_service import get_shop_by_id
+        shop = await get_shop_by_id(shop_id)
+        if not shop or not shop.get("visible_online"):
+            return None
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
                 f"{INVENTORY_SERVICE_URL}/inventories/by/id/{shop_id}/{product_id}"
