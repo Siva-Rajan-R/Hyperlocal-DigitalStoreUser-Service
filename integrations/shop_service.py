@@ -74,10 +74,114 @@ def reshape_shop(shop: Any) -> Any:
         s["distance_km"] = shop["distance_km"]
     return s
 
+import math
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+def filter_shop_delivery_by_location(shop: dict, user_lat: float, user_lon: float, target_delivery_type: Optional[str] = None) -> dict:
+    if not shop:
+        return shop
+    shop_copy = dict(shop)
+    address = shop_copy.get("address") or {}
+    shop_lat_raw = address.get("latitude") if address.get("latitude") is not None else address.get("lat")
+    shop_lon_raw = address.get("longitude") if address.get("longitude") is not None else address.get("lng")
+    
+    dist = None
+    if shop_lat_raw is not None and shop_lon_raw is not None:
+        try:
+            dist = haversine(float(user_lat), float(user_lon), float(shop_lat_raw), float(shop_lon_raw))
+            shop_copy["distance_km"] = round(dist, 2)
+        except (ValueError, TypeError):
+            dist = None
+
+    default_radius_map = {
+        "PICKUP_ONLY": 25.0,
+        "INSTANT": 25.0,
+        "STANDARD": 300.0,
+        "NATIONWIDE": float('inf')
+    }
+
+    delivery_options = shop_copy.get("delivery_options") or []
+    pickup_opt = None
+    instant_opt = None
+    standard_opt = None
+    nationwide_opt = None
+
+    for d in delivery_options:
+        if not d or d.get("enabled") is False:
+            continue
+        raw_type = (d.get("type") or "").upper()
+        if raw_type == "PICKUP_ONLY":
+            pickup_opt = d
+        elif raw_type in ("INSTANT", "EXPRESS"):
+            instant_opt = d
+        elif raw_type in ("STANDARD", "NORMAL"):
+            standard_opt = d
+        elif raw_type in ("NATIONWIDE", "SAME_DAY"):
+            nationwide_opt = d
+
+    def is_covered(opt, default_r):
+        if not opt:
+            return False
+        if default_r == float('inf'):
+            return True
+        if dist is None:
+            return False
+        configured_r = None
+        raw_r = opt.get("radius")
+        if raw_r is not None:
+            try:
+                r = float(raw_r)
+                if r > 0:
+                    configured_r = r
+            except (ValueError, TypeError):
+                pass
+        max_r = configured_r if configured_r is not None else default_r
+        return dist <= max_r
+
+    pickup_covered = is_covered(pickup_opt, default_radius_map.get("PICKUP_ONLY", 25.0))
+    instant_covered = is_covered(instant_opt, default_radius_map.get("INSTANT", 25.0))
+    standard_covered = is_covered(standard_opt, default_radius_map.get("STANDARD", 300.0))
+    nationwide_covered = is_covered(nationwide_opt, float('inf'))
+
+    acceptable_options = []
+    if pickup_covered:
+        acceptable_options.append(pickup_opt)
+
+    # Hierarchical home delivery selection:
+    # If near and covered by Instant: accept ONLY Instant (Standard/Nationwide suppressed for this near location)
+    # Else if covered by Standard: accept Standard
+    # Else if covered by Nationwide: accept Nationwide
+    if instant_covered:
+        acceptable_options.append(instant_opt)
+    elif standard_covered:
+        acceptable_options.append(standard_opt)
+    elif nationwide_covered:
+        acceptable_options.append(nationwide_opt)
+
+    if target_delivery_type:
+        t_upper = target_delivery_type.upper()
+        acceptable_options = [
+            opt for opt in acceptable_options
+            if (opt.get("type") or "").upper() == t_upper or
+               (t_upper == "INSTANT" and (opt.get("type") or "").upper() == "EXPRESS") or
+               (t_upper == "STANDARD" and (opt.get("type") or "").upper() == "NORMAL") or
+               (t_upper == "NATIONWIDE" and (opt.get("type") or "").upper() == "SAME_DAY")
+        ]
+
+    shop_copy["delivery_options"] = acceptable_options
+    return shop_copy
+
 async def get_shops(
     latitude: float,
     longitude: float,
-    delivery_type: str = "INSTANT",
+    delivery_type: Optional[str] = None,
     limit: int = 10,
     offset: int = 1,
     timezone: str = "Asia/Kolkata"
@@ -87,11 +191,12 @@ async def get_shops(
             payload = {
                 "latitude": latitude,
                 "longitude": longitude,
-                "delivery_type": delivery_type,
                 "limit": limit,
                 "offset": offset,
                 "timezone": timezone
             }
+            if delivery_type:
+                payload["delivery_type"] = delivery_type
             response = await client.post(
                 f"{SHOP_SERVICE_URL}/shops/geofenced",
                 json=payload
@@ -113,7 +218,12 @@ async def get_shops(
         ic(f"Error calling Shop Service geofenced endpoint: {e}")
         return {"datas": []}
 
-async def get_shop_by_id(shop_id: str, allow_offline: bool = False) -> Optional[Dict[str, Any]]:
+async def get_shop_by_id(
+    shop_id: str,
+    allow_offline: bool = False,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None
+) -> Optional[Dict[str, Any]]:
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
@@ -127,6 +237,8 @@ async def get_shop_by_id(shop_id: str, allow_offline: bool = False) -> Optional[
                 # If shop is not visible online, do not send to digital store response
                 if not allow_offline and not raw_shop.get("visible_online"):
                     return None
+                if latitude is not None and longitude is not None:
+                    raw_shop = filter_shop_delivery_by_location(raw_shop, latitude, longitude)
                 return reshape_shop(raw_shop)
             return None
     except Exception as e:

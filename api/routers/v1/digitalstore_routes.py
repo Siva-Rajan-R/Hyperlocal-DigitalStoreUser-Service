@@ -43,23 +43,28 @@ async def fetch_product_by_id(shop_id: str, id: str):
 async def fetch_shops(
     latitude: float = Query(..., description="User latitude"),
     longitude: float = Query(..., description="User longitude"),
-    delivery_type: DeliveryTypeEnum = Query(default=DeliveryTypeEnum.INSTANT, description="Delivery type: PICKUP_ONLY, INSTANT, STANDARD, NATIONWIDE"),
+    delivery_type: Optional[DeliveryTypeEnum] = Query(default=None, description="Delivery type: PICKUP_ONLY, INSTANT, STANDARD, NATIONWIDE"),
     limit: int = Query(default=10, ge=1, le=100),
     offset: int = Query(default=1, ge=1),
     timezone: str = Query(default="Asia/Kolkata", description="User timezone")
 ):
+    deliv_val = delivery_type.value if delivery_type and hasattr(delivery_type, "value") else (delivery_type if delivery_type else None)
     return await get_shops(
         latitude=latitude,
         longitude=longitude,
-        delivery_type=delivery_type.value if hasattr(delivery_type, "value") else delivery_type,
+        delivery_type=deliv_val,
         limit=limit,
         offset=offset,
         timezone=timezone
     )
 
 @router.get("/shops/{shop_id}")
-async def fetch_shop_by_id(shop_id: str):
-    shop = await get_shop_by_id(shop_id=shop_id)
+async def fetch_shop_by_id(
+    shop_id: str,
+    latitude: Optional[float] = Query(default=None, description="User latitude"),
+    longitude: Optional[float] = Query(default=None, description="User longitude")
+):
+    shop = await get_shop_by_id(shop_id=shop_id, latitude=latitude, longitude=longitude)
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
     return shop
