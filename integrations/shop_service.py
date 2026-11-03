@@ -100,6 +100,10 @@ def filter_shop_delivery_by_location(shop: dict, user_lat: float, user_lon: floa
         except (ValueError, TypeError):
             dist = None
 
+    if dist is None:
+        # Distance unknown, preserve configured options
+        return shop_copy
+
     default_radius_map = {
         "PICKUP_ONLY": 25.0,
         "INSTANT": 25.0,
@@ -205,14 +209,14 @@ async def get_shops(
                 data = response.json()
                 raw_shops = data.get("data") if isinstance(data, dict) and "data" in data else data
                 if isinstance(raw_shops, list):
-                    return {"datas": [reshape_shop(s) for s in raw_shops if s and s.get("visible_online") is True]}
+                    return {"datas": [reshape_shop(filter_shop_delivery_by_location(s, latitude, longitude, delivery_type)) for s in raw_shops if s and s.get("visible_online") is True]}
                 elif isinstance(raw_shops, dict):
                     datas = raw_shops.get("datas") or []
                     if not datas and ("name" in raw_shops or "id" in raw_shops):
                         if raw_shops.get("visible_online") is True:
-                            return {"datas": [reshape_shop(raw_shops)]}
+                            return {"datas": [reshape_shop(filter_shop_delivery_by_location(raw_shops, latitude, longitude, delivery_type))]}
                         return {"datas": []}
-                    return {"datas": [reshape_shop(s) for s in datas if s and s.get("visible_online") is True]}
+                    return {"datas": [reshape_shop(filter_shop_delivery_by_location(s, latitude, longitude, delivery_type)) for s in datas if s and s.get("visible_online") is True]}
             return {"datas": []}
     except Exception as e:
         ic(f"Error calling Shop Service geofenced endpoint: {e}")
