@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from typing import Optional
 from integrations.inventory_service import get_products, get_products_by_shop, get_product_by_id
 from integrations.shop_service import get_shops, get_shop_by_id
-from integrations.order_service import get_orders_by_user_id, get_order_by_id, create_order
+from integrations.order_service import get_orders_by_user_id, get_order_by_id, create_order, create_return_request
 from integrations.cart_service import init_cart_session, add_cart_item, remove_cart_item, cancel_cart_session, get_cart_session
 from schemas.v1.shop_schemas import DeliveryTypeEnum
 
@@ -70,6 +70,12 @@ async def fetch_shop_by_id(
     return shop
 
 # --- ORDERS ---
+@router.post("/orders/return-request")
+@router.post("/returns/request")
+async def create_digital_store_return_request(request: Request):
+    data = await request.json()
+    return await create_return_request(data)
+
 @router.post("/orders")
 @router.post("/orders/create")
 async def create_digital_store_order(request: Request):

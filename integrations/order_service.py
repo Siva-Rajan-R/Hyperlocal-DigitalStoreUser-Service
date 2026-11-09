@@ -8,6 +8,8 @@ from .shop_service import get_shop_by_id
 
 ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL", "http://127.0.0.1:8007")
 
+NOTIFICATION_SERVICE_URL = os.getenv("NOTIFICATION_SERVICE_URL", "http://127.0.0.1:8009")
+
 def reshape_order(order: Any) -> Any:
     if isinstance(order, list):
         return [reshape_order(o) for o in order]
@@ -67,7 +69,54 @@ async def create_order(data: dict) -> Dict[str, Any]:
                 except Exception:
                     err_detail = response.text
                 raise HTTPException(status_code=response.status_code, detail=err_detail)
-            return response.json()
+            
+            res_json = response.json()
+
+            # Immediately notify the shop about the new online order
+            try:
+                import asyncio
+                ui_id = (
+                    (res_json.get("data") or {}).get("ui_id") or
+                    (res_json.get("data") or {}).get("id") or
+                    res_json.get("ui_id") or
+                    res_json.get("id") or
+                    data.get("ui_id") or
+                    "Online Order"
+                )
+                cust_name = data.get("name") or data.get("customer_name") or "A customer"
+                calc_info = data.get("calculation_infos") or {}
+                total_val = calc_info.get("grand_total") or calc_info.get("total") or data.get("total_sellprice") or 0.0
+
+                notif_payload = {
+                    "title": "New Online Order Received!",
+                    "message": f"New online order '{ui_id}' received from {cust_name} for ₹{float(total_val):.2f}.",
+                    "type": "success",
+                    "target_type": "particular",
+                    "user_id": shop_id,
+                    "user_ids": [shop_id],
+                    "additional_metadata": {
+                        "shop_id": shop_id,
+                        "order_id": str(ui_id),
+                        "ui_id": str(ui_id),
+                        "origin": "ONLINE",
+                        "is_online": True,
+                        "category": "digital_store",
+                        "channel": "digital_store",
+                        "total_amount": float(total_val),
+                        "customer_name": cust_name
+                    }
+                }
+                async def _push_notif():
+                    try:
+                        async with httpx.AsyncClient(timeout=4.0) as notif_c:
+                            await notif_c.post(f"{NOTIFICATION_SERVICE_URL}/notifications/send", json=notif_payload)
+                    except Exception as err:
+                        ic(f"Failed to post online order notification: {err}")
+                asyncio.create_task(_push_notif())
+            except Exception as e:
+                ic(f"Could not prepare notification payload: {e}")
+
+            return res_json
     except HTTPException:
         raise
     except Exception as e:
@@ -124,3 +173,25 @@ async def get_order_by_id(shop_id: str, order_id: str) -> Optional[Dict[str, Any
     except Exception as e:
         ic(f"Error calling Order Service for order {order_id}: {e}")
         return None
+
+async def create_return_request(data: dict) -> Dict[str, Any]:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{ORDER_SERVICE_URL}/returns/request",
+                json=data
+            )
+            if response.status_code >= 400:
+                try:
+                    err_json = response.json()
+                    err_detail = err_json.get("detail", response.text)
+                except Exception:
+                    err_detail = response.text
+                raise HTTPException(status_code=response.status_code, detail=err_detail)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        ic(f"Error calling Order Service for return request: {e}")
+        raise HTTPException(status_code=500, detail=f"Order Service communication error: {str(e)}")
+
