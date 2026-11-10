@@ -106,6 +106,7 @@ def filter_shop_delivery_by_location(shop: dict, user_lat: float, user_lon: floa
 
     default_radius_map = {
         "PICKUP_ONLY": 25.0,
+        "DELIVERY": 15.0,
         "INSTANT": 25.0,
         "STANDARD": 300.0,
         "NATIONWIDE": float('inf')
@@ -113,6 +114,7 @@ def filter_shop_delivery_by_location(shop: dict, user_lat: float, user_lon: floa
 
     delivery_options = shop_copy.get("delivery_options") or []
     pickup_opt = None
+    delivery_opt = None
     instant_opt = None
     standard_opt = None
     nationwide_opt = None
@@ -121,8 +123,10 @@ def filter_shop_delivery_by_location(shop: dict, user_lat: float, user_lon: floa
         if not d or d.get("enabled") is False:
             continue
         raw_type = (d.get("type") or "").upper()
-        if raw_type == "PICKUP_ONLY":
+        if raw_type in ("PICKUP_ONLY", "PICKUP", "STORE_PICKUP"):
             pickup_opt = d
+        elif raw_type == "DELIVERY":
+            delivery_opt = d
         elif raw_type in ("INSTANT", "EXPRESS"):
             instant_opt = d
         elif raw_type in ("STANDARD", "NORMAL"):
@@ -130,8 +134,11 @@ def filter_shop_delivery_by_location(shop: dict, user_lat: float, user_lon: floa
         elif raw_type in ("NATIONWIDE", "SAME_DAY"):
             nationwide_opt = d
 
+    if not delivery_opt:
+        delivery_opt = instant_opt or standard_opt or nationwide_opt
+
     def is_covered(opt, default_r):
-        if not opt:
+        if not opt or opt.get("enabled") is False:
             return False
         if default_r == float('inf'):
             return True
@@ -150,34 +157,36 @@ def filter_shop_delivery_by_location(shop: dict, user_lat: float, user_lon: floa
         return dist <= max_r
 
     pickup_covered = is_covered(pickup_opt, default_radius_map.get("PICKUP_ONLY", 25.0))
+    delivery_covered = is_covered(delivery_opt, default_radius_map.get("DELIVERY", 15.0))
     instant_covered = is_covered(instant_opt, default_radius_map.get("INSTANT", 25.0))
     standard_covered = is_covered(standard_opt, default_radius_map.get("STANDARD", 300.0))
     nationwide_covered = is_covered(nationwide_opt, float('inf'))
 
     acceptable_options = []
-    if pickup_covered:
+    if pickup_covered and pickup_opt:
         acceptable_options.append(pickup_opt)
 
-    # Hierarchical home delivery selection:
-    # If near and covered by Instant: accept ONLY Instant (Standard/Nationwide suppressed for this near location)
-    # Else if covered by Standard: accept Standard
-    # Else if covered by Nationwide: accept Nationwide
-    if instant_covered:
+    if delivery_covered and delivery_opt:
+        acceptable_options.append(delivery_opt)
+    elif instant_covered and instant_opt:
         acceptable_options.append(instant_opt)
-    elif standard_covered:
+    elif standard_covered and standard_opt:
         acceptable_options.append(standard_opt)
-    elif nationwide_covered:
+    elif nationwide_covered and nationwide_opt:
         acceptable_options.append(nationwide_opt)
 
     if target_delivery_type:
         t_upper = target_delivery_type.upper()
-        acceptable_options = [
-            opt for opt in acceptable_options
-            if (opt.get("type") or "").upper() == t_upper or
-               (t_upper == "INSTANT" and (opt.get("type") or "").upper() == "EXPRESS") or
-               (t_upper == "STANDARD" and (opt.get("type") or "").upper() == "NORMAL") or
-               (t_upper == "NATIONWIDE" and (opt.get("type") or "").upper() == "SAME_DAY")
-        ]
+        if t_upper in ("PICKUP_ONLY", "PICKUP"):
+            acceptable_options = [
+                opt for opt in acceptable_options
+                if (opt.get("type") or "").upper() in ("PICKUP_ONLY", "PICKUP", "STORE_PICKUP")
+            ]
+        else:
+            acceptable_options = [
+                opt for opt in acceptable_options
+                if (opt.get("type") or "").upper() not in ("PICKUP_ONLY", "PICKUP", "STORE_PICKUP")
+            ]
 
     shop_copy["delivery_options"] = acceptable_options
     return shop_copy
@@ -208,15 +217,26 @@ async def get_shops(
             if response.status_code == 200:
                 data = response.json()
                 raw_shops = data.get("data") if isinstance(data, dict) and "data" in data else data
+                shop_list = []
                 if isinstance(raw_shops, list):
-                    return {"datas": [reshape_shop(filter_shop_delivery_by_location(s, latitude, longitude, delivery_type)) for s in raw_shops if s and s.get("visible_online") is True]}
+                    shop_list = raw_shops
                 elif isinstance(raw_shops, dict):
-                    datas = raw_shops.get("datas") or []
-                    if not datas and ("name" in raw_shops or "id" in raw_shops):
-                        if raw_shops.get("visible_online") is True:
-                            return {"datas": [reshape_shop(filter_shop_delivery_by_location(raw_shops, latitude, longitude, delivery_type))]}
-                        return {"datas": []}
-                    return {"datas": [reshape_shop(filter_shop_delivery_by_location(s, latitude, longitude, delivery_type)) for s in datas if s and s.get("visible_online") is True]}
+                    shop_list = raw_shops.get("datas") or []
+                    if not shop_list and ("name" in raw_shops or "id" in raw_shops):
+                        shop_list = [raw_shops]
+
+                covering_shops = []
+                for s in shop_list:
+                    if not s or s.get("visible_online") is not True:
+                        continue
+                    filtered_s = filter_shop_delivery_by_location(s, latitude, longitude, delivery_type)
+                    # ONLY show shop if it has delivery options covering the user's location
+                    if not filtered_s or not filtered_s.get("delivery_options") or len(filtered_s.get("delivery_options", [])) == 0:
+                        continue
+                    covering_shops.append(reshape_shop(filtered_s))
+
+                covering_shops.sort(key=lambda x: x.get("distance_km", 999999))
+                return {"datas": covering_shops}
             return {"datas": []}
     except Exception as e:
         ic(f"Error calling Shop Service geofenced endpoint: {e}")
