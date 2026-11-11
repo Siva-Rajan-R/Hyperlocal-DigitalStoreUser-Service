@@ -102,6 +102,8 @@ async def create_order(data: dict) -> Dict[str, Any]:
                         "is_online": True,
                         "category": "digital_store",
                         "channel": "digital_store",
+                        "audience": "shop",
+                        "target_shop": True,
                         "total_amount": float(total_val),
                         "customer_name": cust_name
                     }
@@ -194,4 +196,58 @@ async def create_return_request(data: dict) -> Dict[str, Any]:
     except Exception as e:
         ic(f"Error calling Order Service for return request: {e}")
         raise HTTPException(status_code=500, detail=f"Order Service communication error: {str(e)}")
+
+
+async def get_return_requests_by_user_id(user_id: str, limit: int = 50, offset: int = 1) -> Dict[str, Any]:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{ORDER_SERVICE_URL}/orders/return-requests/by/user/{user_id}",
+                params={"limit": limit, "offset": offset}
+            )
+            if response.status_code == 200:
+                data = response.json()
+                payload = data.get("data") if isinstance(data, dict) and "data" in data else data
+                if isinstance(payload, list):
+                    return {"data": payload}
+                if isinstance(payload, dict):
+                    return payload
+            return {"data": []}
+    except Exception as e:
+        ic(f"Error fetching user return requests from Order Service: {e}")
+        return {"data": []}
+
+
+async def update_order_status(data: dict, forward_headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    payload = dict(data)
+    headers = dict(forward_headers or {})
+    headers.setdefault("x-origin", "digitalstore")
+    if isinstance(payload.get("status"), str) and payload["status"].strip().upper() in ("CANCELED", "CANCELLED"):
+        payload["status"] = "CANCELED"
+        add_infos = dict(payload.get("additional_infos") or {}) if isinstance(payload.get("additional_infos"), dict) else {}
+        add_infos["cancelled_by_source"] = "DIGITAL_STORE"
+        add_infos["cancelled_by"] = "Customer"
+        add_infos["cancelled_by_label"] = "Cancelled by Customer"
+        payload["additional_infos"] = add_infos
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.put(
+                f"{ORDER_SERVICE_URL}/orders/status",
+                json=payload,
+                headers=headers
+            )
+            if response.status_code >= 400:
+                try:
+                    err_json = response.json()
+                    err_detail = err_json.get("detail", response.text)
+                except Exception:
+                    err_detail = response.text
+                raise HTTPException(status_code=response.status_code, detail=err_detail)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        ic(f"Error calling Order Service for status update: {e}")
+        raise HTTPException(status_code=500, detail=f"Order Service communication error: {str(e)}")
+
 

@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from typing import Optional
 from integrations.inventory_service import get_products, get_products_by_shop, get_product_by_id
 from integrations.shop_service import get_shops, get_shop_by_id
-from integrations.order_service import get_orders_by_user_id, get_order_by_id, create_order, create_return_request
+from integrations.order_service import get_orders_by_user_id, get_order_by_id, create_order, create_return_request, update_order_status, get_return_requests_by_user_id
 from integrations.cart_service import init_cart_session, add_cart_item, remove_cart_item, cancel_cart_session, get_cart_session
 from schemas.v1.shop_schemas import DeliveryTypeEnum
 
@@ -81,6 +81,29 @@ async def create_digital_store_return_request(request: Request):
 async def create_digital_store_order(request: Request):
     data = await request.json()
     return await create_order(data)
+
+@router.put("/orders/status")
+@router.post("/orders/cancel")
+async def update_digital_store_order_status(request: Request):
+    data = await request.json()
+    if request.url.path.endswith("/cancel") and not data.get("status"):
+        data["status"] = "CANCELED"
+    forward_headers = {}
+    for hdr in ("x-user-infos", "authorization"):
+        val = request.headers.get(hdr)
+        if val:
+            forward_headers[hdr] = val
+    return await update_order_status(data, forward_headers=forward_headers)
+
+
+@router.get("/orders/return-requests/by/user/{user_id}")
+async def fetch_user_return_requests(
+    user_id: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=1, ge=1)
+):
+    return await get_return_requests_by_user_id(user_id=user_id, limit=limit, offset=offset)
+
 
 @router.get("/orders/by/user/{user_id}")
 async def fetch_user_orders(
