@@ -39,6 +39,13 @@ class ShopReviewSchema(BaseModel):
     shop_id: str
     rating: float = Field(..., ge=1.0, le=5.0)
     review_text: Optional[str] = None
+    user_name: Optional[str] = None
+
+class ShopReviewSummarySchema(BaseModel):
+    shop_id: str
+    average_rating: float = 0.0
+    review_count: int = 0
+    star_counts: Dict[str, int] = Field(default_factory=lambda: {"5": 0, "4": 0, "3": 0, "2": 0, "1": 0})
 
 class PaymentInfoSchema(BaseModel):
     transaction_id: str

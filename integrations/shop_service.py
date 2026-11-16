@@ -21,7 +21,8 @@ def reshape_shop(shop: Any) -> Any:
         "visible_online",
         "has_operating_hours", "has_delivery_options",
         "is_digital_store_configured", "can_show_digital_store_dashboard",
-        "additional_infos", "datas", "vacation_mode", "vacation_infos"
+        "additional_infos", "datas", "vacation_mode", "vacation_infos",
+        "rating", "review_count"
     ]
     for key in allowed_keys:
         if key in shop:
@@ -191,6 +192,42 @@ def filter_shop_delivery_by_location(shop: dict, user_lat: float, user_lon: floa
     shop_copy["delivery_options"] = acceptable_options
     return shop_copy
 
+async def enrich_shops_with_ratings(shops: List[Dict[str, Any]]) -> None:
+    if not shops:
+        return
+    try:
+        from infras.db.mongo import MongoDBManager, get_collection
+        if MongoDBManager.db is None:
+            return
+        shop_ids = [s.get("id") for s in shops if s and s.get("id")]
+        if not shop_ids:
+            return
+        reviews = get_collection("reviews")
+        pipeline = [
+            {"$match": {"shop_id": {"$in": shop_ids}}},
+            {"$group": {
+                "_id": "$shop_id",
+                "avg_rating": {"$avg": "$rating"},
+                "review_count": {"$sum": 1}
+            }}
+        ]
+        cursor = reviews.aggregate(pipeline)
+        rating_map = {}
+        async for doc in cursor:
+            sid = doc.get("_id")
+            if sid:
+                rating_map[sid] = (
+                    round(float(doc.get("avg_rating") or 0.0), 1),
+                    int(doc.get("review_count") or 0)
+                )
+        for s in shops:
+            if s and s.get("id"):
+                avg, count = rating_map.get(s["id"], (0.0, 0))
+                s["rating"] = avg
+                s["review_count"] = count
+    except Exception as e:
+        ic(f"Error enriching shop ratings: {e}")
+
 async def get_shops(
     latitude: float,
     longitude: float,
@@ -236,6 +273,7 @@ async def get_shops(
                     covering_shops.append(reshape_shop(filtered_s))
 
                 covering_shops.sort(key=lambda x: x.get("distance_km", 999999))
+                await enrich_shops_with_ratings(covering_shops)
                 return {"datas": covering_shops}
             return {"datas": []}
     except Exception as e:
@@ -263,7 +301,10 @@ async def get_shop_by_id(
                     return None
                 if latitude is not None and longitude is not None:
                     raw_shop = filter_shop_delivery_by_location(raw_shop, latitude, longitude)
-                return reshape_shop(raw_shop)
+                reshaped = reshape_shop(raw_shop)
+                if reshaped:
+                    await enrich_shops_with_ratings([reshaped])
+                return reshaped
             return None
     except Exception as e:
         ic(f"Error calling Shop Service for shop {shop_id}: {e}")

@@ -231,27 +231,84 @@ async def get_shop_followers_count(shop_id: str):
 @router.post("/reviews")
 async def review_shop(data: ShopReviewSchema):
     reviews = get_collection("reviews")
+    user_name = data.user_name
+    if not user_name:
+        try:
+            users = get_collection("users")
+            user_doc = await users.find_one({"user_id": data.user_id}, {"name": 1})
+            if user_doc and user_doc.get("name"):
+                user_name = user_doc["name"]
+        except Exception:
+            pass
+    if not user_name or not user_name.strip():
+        user_name = "Customer"
+
+    now = datetime.utcnow()
     await reviews.update_one(
         {"user_id": data.user_id, "shop_id": data.shop_id},
         {"$set": {
-            "rating": data.rating,
+            "user_id": data.user_id,
+            "shop_id": data.shop_id,
+            "rating": float(data.rating),
             "review_text": data.review_text,
-            "timestamp": datetime.utcnow()
+            "user_name": user_name,
+            "timestamp": now,
+            "updated_at": now
         }},
         upsert=True
     )
-    return {"message": "Shop review saved"}
+    return {"message": "Shop review saved", "status": "success"}
 
 @router.get("/reviews/shop/{shop_id}")
 async def get_shop_reviews(
     shop_id: str,
-    limit: int = Query(default=10, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0)
 ):
     reviews = get_collection("reviews")
-    cursor = reviews.find({"shop_id": shop_id}, {"_id": 0}).skip(offset).limit(limit)
+    cursor = reviews.find({"shop_id": shop_id}, {"_id": 0}).sort("timestamp", -1).skip(offset).limit(limit)
     results = await cursor.to_list(length=limit)
+    for r in results:
+        if "user_name" not in r or not r["user_name"]:
+            r["user_name"] = "Customer"
+        if "timestamp" in r and isinstance(r["timestamp"], datetime):
+            r["timestamp"] = r["timestamp"].isoformat()
     return results
+
+@router.get("/reviews/shop/{shop_id}/summary")
+async def get_shop_review_summary(shop_id: str):
+    reviews = get_collection("reviews")
+    cursor = reviews.find({"shop_id": shop_id}, {"_id": 0, "rating": 1})
+    all_reviews = await cursor.to_list(length=1000)
+    
+    count = len(all_reviews)
+    if count == 0:
+        return {
+            "shop_id": shop_id,
+            "average_rating": 0.0,
+            "review_count": 0,
+            "star_counts": {"5": 0, "4": 0, "3": 0, "2": 0, "1": 0}
+        }
+    
+    star_counts = {5: 0, 4: 0, 3: 0, 2: 0, 1: 0}
+    total_rating = 0.0
+    for r in all_reviews:
+        val = float(r.get("rating", 0.0))
+        total_rating += val
+        star_key = int(round(val))
+        if star_key < 1:
+            star_key = 1
+        elif star_key > 5:
+            star_key = 5
+        star_counts[star_key] += 1
+
+    avg = round(total_rating / count, 1)
+    return {
+        "shop_id": shop_id,
+        "average_rating": avg,
+        "review_count": count,
+        "star_counts": {str(k): v for k, v in star_counts.items()}
+    }
 
 @router.get("/reviews/user/{user_id}")
 async def get_user_reviews(
@@ -260,8 +317,11 @@ async def get_user_reviews(
     offset: int = Query(default=0, ge=0)
 ):
     reviews = get_collection("reviews")
-    cursor = reviews.find({"user_id": user_id}, {"_id": 0}).skip(offset).limit(limit)
+    cursor = reviews.find({"user_id": user_id}, {"_id": 0}).sort("timestamp", -1).skip(offset).limit(limit)
     results = await cursor.to_list(length=limit)
+    for r in results:
+        if "timestamp" in r and isinstance(r["timestamp"], datetime):
+            r["timestamp"] = r["timestamp"].isoformat()
     return results
 
 

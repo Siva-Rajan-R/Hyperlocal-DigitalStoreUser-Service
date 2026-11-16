@@ -19,6 +19,24 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://shopiq.inventq.in",
+        "http://shopiq.inventq.in",
+        "https://app.inventq.in",
+        "https://dev.app.inventq.in",
+        "http://localhost:5173",
+        "http://localhost:5175",
+        "*"
+    ],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(user_routes.router)
 app.include_router(digitalstore_routes.router)
 
@@ -29,7 +47,7 @@ from urllib.parse import quote
 async def root_fallback(request: Request):
     error = request.query_params.get("error")
     if error:
-        return RedirectResponse(url=f"http://localhost:5173/auth/callback?error={quote(str(error))}")
+        return RedirectResponse(url=f"https://shopiq.inventq.in/auth/callback?error={quote(str(error))}")
     return {"service": "DigitalStoreUser-Service", "status": "running"}
 
 if __name__ == "__main__":

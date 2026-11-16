@@ -69,6 +69,30 @@ async def fetch_shop_by_id(
         raise HTTPException(status_code=404, detail="Shop not found")
     return shop
 
+# --- REVIEWS ---
+@router.get("/shops/{shop_id}/reviews")
+async def fetch_shop_reviews(
+    shop_id: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0)
+):
+    from api.routers.v1.user_routes import get_shop_reviews
+    return await get_shop_reviews(shop_id=shop_id, limit=limit, offset=offset)
+
+@router.get("/shops/{shop_id}/reviews/summary")
+async def fetch_shop_review_summary(shop_id: str):
+    from api.routers.v1.user_routes import get_shop_review_summary
+    return await get_shop_review_summary(shop_id=shop_id)
+
+@router.post("/shops/{shop_id}/reviews")
+async def submit_shop_review(shop_id: str, request: Request):
+    from api.routers.v1.user_routes import review_shop
+    from schemas.v1.user_schemas import ShopReviewSchema
+    data = await request.json()
+    data["shop_id"] = shop_id
+    schema = ShopReviewSchema(**data)
+    return await review_shop(schema)
+
 # --- ORDERS ---
 @router.post("/orders/return-request")
 @router.post("/returns/request")
