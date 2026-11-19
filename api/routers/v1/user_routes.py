@@ -38,6 +38,8 @@ async def create_profile(profile: UserProfileSchema):
                 "name": profile.name,
                 "addresses": addresses,
                 "preferences": profile.preferences,
+                "is_deleted": False,
+                "deleted_at": None,
                 "updated_at": datetime.utcnow()
             }}
         )
@@ -48,6 +50,7 @@ async def create_profile(profile: UserProfileSchema):
         "name": profile.name,
         "addresses": addresses,
         "preferences": profile.preferences,
+        "is_deleted": False,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     })
@@ -57,7 +60,7 @@ async def create_profile(profile: UserProfileSchema):
 async def get_profile(user_id: str):
     users = get_collection("users")
     profile = await users.find_one({"user_id": user_id}, {"_id": 0})
-    if not profile:
+    if not profile or profile.get("is_deleted") is True:
         raise HTTPException(status_code=404, detail="User profile not found")
     return profile
 
@@ -88,6 +91,24 @@ async def update_profile(user_id: str, data: UpdateUserProfileSchema):
         await users.update_one({"user_id": user_id}, {"$set": update_data})
         
     return {"message": "Profile updated successfully", "user_id": user_id}
+
+@router.delete("/profile/{user_id}")
+async def delete_profile(user_id: str):
+    users = get_collection("users")
+    histories = get_collection("search_histories")
+    fav_products = get_collection("favourite_products")
+    fav_shops = get_collection("favourite_shops")
+
+    # Soft delete profile record
+    await users.update_one(
+        {"user_id": user_id},
+        {"$set": {"is_deleted": True, "deleted_at": datetime.utcnow(), "updated_at": datetime.utcnow()}}
+    )
+    # Clear user private preferences/cache
+    await histories.delete_many({"user_id": user_id})
+    await fav_products.delete_many({"user_id": user_id})
+    await fav_shops.delete_many({"user_id": user_id})
+    return {"message": "User profile soft-deleted and personal cache cleared", "user_id": user_id}
 
 @router.get("/{user_id}/address/{address_id}")
 async def get_user_address(user_id: str, address_id: str):
